@@ -1,3 +1,4 @@
+@tool
 @icon("res://addons/yoi_state_tree/orbit (1).svg")
 class_name YoiStateTree
 extends Node
@@ -21,19 +22,19 @@ var _running: bool = false
 var _pending_events: Array[StringName] = []
 var _tick_timer: float = 0.0
 var _root_state: YoiState
-var _state_child_states: Dictionary = {}
-var _state_transitions: Dictionary = {}
-var _state_tasks: Dictionary = {}
-var _state_sensors: Dictionary = {}
-var _state_enter_conditions: Dictionary = {}
-var _state_selection_weights: Dictionary = {}
-var _transition_conditions: Dictionary = {}
+var _state_child_states: Dictionary = { }
+var _state_transitions: Dictionary = { }
+var _state_tasks: Dictionary = { }
+var _state_sensors: Dictionary = { }
+var _state_enter_conditions: Dictionary = { }
+var _state_selection_weights: Dictionary = { }
+var _transition_conditions: Dictionary = { }
+var _state_enter_status: Dictionary = { } ## state → enter結果(SUCCESS/FAILURE/RUNNING)、最初のtick評価後にconsume
 
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
-	_rebuild_runtime_cache()
 	if autostart:
 		start()
 
@@ -74,6 +75,7 @@ func stop() -> void:
 	for i in range(_active_path.size() - 1, -1, -1):
 		_exit_state(_active_path[i])
 	_active_path.clear()
+	_state_enter_status.clear()
 	_running = false
 
 
@@ -122,6 +124,7 @@ func _tick(delta: float) -> void:
 			if _evaluate_transition(state, transition, status):
 				transition_target = transition.target_state
 				break
+		_state_enter_status.erase(state) # ON_ENTER_*は1tick限り有効
 		if transition_target != null:
 			break
 
@@ -151,9 +154,9 @@ func _tick_state_tasks(state: YoiState, delta: float) -> int:
 
 
 func _evaluate_transition(
-	_owner_state: YoiState,
-	transition: YoiTransition,
-	state_status: int
+		_owner_state: YoiState,
+		transition: YoiTransition,
+		state_status: int,
 ) -> bool:
 	if transition.target_state == null:
 		return false
@@ -173,6 +176,12 @@ func _evaluate_transition(
 				return false
 		YoiTransition.Trigger.ON_EVENT:
 			if transition.event == &"" or transition.event not in _pending_events:
+				return false
+		YoiTransition.Trigger.ON_ENTER_SUCCEEDED:
+			if _state_enter_status.get(_owner_state, -1) != YoiTask.SUCCESS:
+				return false
+		YoiTransition.Trigger.ON_ENTER_FAILED:
+			if _state_enter_status.get(_owner_state, -1) != YoiTask.FAILURE:
 				return false
 
 	# Conditions評価（AND結合）
@@ -214,10 +223,23 @@ func _do_transition(target: YoiState) -> void:
 
 func _enter_state(state: YoiState) -> void:
 	var ctx := YoiCtx.new(self, state)
-	for task in _get_runtime_tasks(state):
-		task._enter(ctx)
+	_state_enter_status[state] = _compute_enter_status(state, ctx)
 	_active_path.append(state)
 	state_entered.emit(state)
+
+
+func _compute_enter_status(state: YoiState, ctx: YoiCtx) -> int:
+	var tasks := _get_runtime_tasks(state)
+	if tasks.is_empty():
+		return YoiTask.SUCCESS
+	var all_succeeded := true
+	for task in tasks:
+		var s: int = task._enter(ctx)
+		if s == YoiTask.FAILURE:
+			return YoiTask.FAILURE
+		if s == YoiTask.RUNNING:
+			all_succeeded = false
+	return YoiTask.SUCCESS if all_succeeded else YoiTask.RUNNING
 
 
 func _exit_state(state: YoiState) -> void:
@@ -316,10 +338,6 @@ func _build_path_from_root(state: YoiState) -> Array[YoiState]:
 	return path
 
 
-func _get_root_state() -> YoiState:
-	return _root_state
-
-
 func _rebuild_runtime_cache() -> void:
 	_root_state = null
 	_state_child_states.clear()
@@ -346,66 +364,47 @@ func _cache_state_runtime(state: YoiState) -> void:
 			_cache_state_runtime(child)
 		elif child is YoiTransition:
 			transitions.append(child)
-			_transition_conditions[child] = _duplicate_resources(child.conditions)
+			_transition_conditions[child] = child.conditions
 
 	_state_child_states[state] = child_states
 	_state_transitions[state] = transitions
-	_state_tasks[state] = _duplicate_resources(state.tasks)
-	_state_sensors[state] = _duplicate_resources(state.sensors)
-	_state_enter_conditions[state] = _duplicate_resources(state.enter_conditions)
-	_state_selection_weights[state] = _duplicate_resource(state.selection_weight)
-
-
-func _duplicate_resources(resources: Array) -> Array:
-	var duplicated: Array = []
-	for resource in resources:
-		duplicated.append(_duplicate_resource(resource))
-	return duplicated
-
-
-func _duplicate_resource(resource: Resource) -> Resource:
-	if resource == null:
-		return null
-	return resource.duplicate()
+	_state_tasks[state] = state.tasks
+	_state_sensors[state] = state.sensors
+	_state_enter_conditions[state] = state.enter_conditions
+	_state_selection_weights[state] = state.selection_weight
 
 
 func _get_runtime_child_states(state: YoiState) -> Array[YoiState]:
-	var child_states: Array[YoiState] = []
-	for child in _state_child_states.get(state, []):
-		child_states.append(child)
-	return child_states
+	var r: Array[YoiState] = []
+	r.assign(_state_child_states.get(state, []))
+	return r
 
 
 func _get_runtime_transitions(state: YoiState) -> Array[YoiTransition]:
-	var transitions: Array[YoiTransition] = []
-	for transition in _state_transitions.get(state, []):
-		transitions.append(transition)
-	return transitions
+	var r: Array[YoiTransition] = []
+	r.assign(_state_transitions.get(state, []))
+	return r
 
 
 func _get_runtime_tasks(state: YoiState) -> Array[YoiTask]:
-	var tasks: Array[YoiTask] = []
-	for task in _state_tasks.get(state, []):
-		tasks.append(task)
-	return tasks
+	var r: Array[YoiTask] = []
+	r.assign(_state_tasks.get(state, []))
+	return r
 
 
 func _get_runtime_sensors(state: YoiState) -> Array[YoiSensor]:
-	var sensors: Array[YoiSensor] = []
-	for sensor in _state_sensors.get(state, []):
-		sensors.append(sensor)
-	return sensors
+	var r: Array[YoiSensor] = []
+	r.assign(_state_sensors.get(state, []))
+	return r
 
 
 func _get_runtime_enter_conditions(state: YoiState) -> Array[YoiCondition]:
-	var conditions: Array[YoiCondition] = []
-	for condition in _state_enter_conditions.get(state, []):
-		conditions.append(condition)
-	return conditions
+	var r: Array[YoiCondition] = []
+	r.assign(_state_enter_conditions.get(state, []))
+	return r
 
 
 func _get_runtime_transition_conditions(transition: YoiTransition) -> Array[YoiCondition]:
-	var conditions: Array[YoiCondition] = []
-	for condition in _transition_conditions.get(transition, []):
-		conditions.append(condition)
-	return conditions
+	var r: Array[YoiCondition] = []
+	r.assign(_transition_conditions.get(transition, []))
+	return r

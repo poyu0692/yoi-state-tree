@@ -8,6 +8,8 @@ enum Trigger {
 	ON_FAILED, ## ステートのタスクがFAILEDになったとき
 	ON_COMPLETED, ## SUCCEEDED または FAILED どちらでも
 	ON_EVENT, ## send_event() で発火
+	ON_ENTER_SUCCEEDED, ## ステートに入ったとき全タスクの_enterがSUCCESSを返したとき
+	ON_ENTER_FAILED, ## ステートに入ったとき任意タスクの_enterがFAILUREを返したとき
 }
 
 @export var trigger: Trigger = Trigger.ON_TICK

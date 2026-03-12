@@ -10,7 +10,7 @@ enum SelectionMode {
 	WEIGHTED_RANDOM, ## selection_weightを重みにしたランダム選択
 }
 
-const _WARNING_INTERVAL: float = 1.0
+const _WARNING_INTERVAL: float = 1.5
 
 @export_group("Conditions")
 @export var sensors: Array[YoiSensor] = []
