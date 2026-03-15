@@ -1,3 +1,4 @@
+@icon("res://addons/yoi_state_tree/weight.svg")
 class_name YoiSelectionWeight
 extends Resource
 

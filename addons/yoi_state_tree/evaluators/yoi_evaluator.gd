@@ -1,20 +1,12 @@
 @tool
-@icon("res://addons/yoi_state_tree/square-play (3).svg")
+@icon("res://addons/yoi_state_tree/pencil-line.svg")
 @abstract
-class_name YoiTask
+class_name YoiEvaluator
 extends Resource
-
-const SUCCESS := 0
-const FAILURE := 1
-const RUNNING := 2
 
 
 var __editor_blackboard: YoiBlackboard
 var __editor_owner: WeakRef
-
-
-func _init() -> void:
-	resource_local_to_scene = true
 
 
 func _inject_editor_refs(owner: Node, bb: YoiBlackboard) -> void:
@@ -27,13 +19,5 @@ func _get_warnings() -> PackedStringArray:
 	return PackedStringArray()
 
 
-func _enter(ctx: YoiCtx) -> int:
-	return SUCCESS
-
-
-func _tick(delta: float, ctx: YoiCtx) -> int:
-	return SUCCESS
-
-
-func _exit(ctx: YoiCtx) -> void:
-	pass
+@abstract
+func _tick(ctx: YoiCtx) -> void

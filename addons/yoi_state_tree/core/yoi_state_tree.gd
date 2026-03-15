@@ -6,9 +6,10 @@ extends Node
 signal state_entered(state: YoiState)
 signal state_exited(state: YoiState)
 signal transition_taken(from_state: YoiState, to_state: YoiState)
+signal state_leaf_changed(current_state: StringName)
 signal notified(event_name: StringName, data: Variant)
 
-enum UpdateMode { PROCESS, PHYSICS }
+enum UpdateMode {PROCESS, PHYSICS, MANUAL}
 
 @export var active: bool = true
 @export var autostart: bool = true
@@ -22,14 +23,9 @@ var _running: bool = false
 var _pending_events: Array[StringName] = []
 var _tick_timer: float = 0.0
 var _root_state: YoiState
-var _state_child_states: Dictionary = { }
-var _state_transitions: Dictionary = { }
-var _state_tasks: Dictionary = { }
-var _state_sensors: Dictionary = { }
-var _state_enter_conditions: Dictionary = { }
-var _state_selection_weights: Dictionary = { }
-var _transition_conditions: Dictionary = { }
-var _state_enter_status: Dictionary = { } ## state → enter結果(SUCCESS/FAILURE/RUNNING)、最初のtick評価後にconsume
+var _state_child_states: Dictionary[YoiState, Array] = {}
+var _transition_targets: Dictionary[YoiTransition, YoiState] = {}
+var _state_enter_status: Dictionary[YoiState, int] = {} ## state → enter結果(SUCCESS/FAILURE/RUNNING)、最初のtick評価後にconsume
 
 
 func _ready() -> void:
@@ -46,6 +42,11 @@ func _process(delta: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	if update_mode == UpdateMode.PHYSICS:
+		_try_tick(delta)
+
+
+func tick(delta: float) -> void:
+	if update_mode == UpdateMode.MANUAL:
 		_try_tick(delta)
 
 
@@ -67,6 +68,9 @@ func start() -> void:
 	_running = true
 	for state in _build_path_to_leaf(root):
 		_enter_state(state)
+	var current := get_current_state()
+	if current != null:
+		state_leaf_changed.emit(_to_state_key(current))
 
 
 func stop() -> void:
@@ -106,12 +110,12 @@ func _try_tick(delta: float) -> void:
 func _tick(delta: float) -> void:
 	# 1. Sensors tick (root → leaf)
 	for state in _active_path:
-		for sensor in _get_runtime_sensors(state):
-			if sensor != null:
-				sensor._tick(YoiCtx.new(self, state))
+		for evaluator in state.evaluators:
+			if evaluator != null:
+				evaluator._tick(YoiCtx.new(self , state))
 
 	# 2. Tasks tick (root → leaf) → Status収集
-	var state_statuses: Dictionary = { }
+	var state_statuses: Dictionary = {}
 	for state in _active_path:
 		state_statuses[state] = _tick_state_tasks(state, delta)
 
@@ -120,9 +124,9 @@ func _tick(delta: float) -> void:
 	for i in range(_active_path.size() - 1, -1, -1):
 		var state := _active_path[i]
 		var status: int = state_statuses.get(state, YoiTask.RUNNING)
-		for transition in _get_runtime_transitions(state):
+		for transition in state.transitions:
 			if _evaluate_transition(state, transition, status):
-				transition_target = transition.target_state
+				transition_target = _transition_targets[transition]
 				break
 		_state_enter_status.erase(state) # ON_ENTER_*は1tick限り有効
 		if transition_target != null:
@@ -132,19 +136,21 @@ func _tick(delta: float) -> void:
 	if transition_target != null:
 		var from_leaf := get_current_state()
 		_do_transition(transition_target)
-		transition_taken.emit(from_leaf, get_current_state())
+		var to_leaf := get_current_state()
+		transition_taken.emit(from_leaf, to_leaf)
+		if from_leaf != to_leaf and to_leaf != null:
+			state_leaf_changed.emit(_to_state_key(to_leaf))
 
 	_pending_events.clear()
 
 
 # 複数タスクのStatus集約: 1つでもFAILED→FAILED、全部SUCCEEDED→SUCCEEDED、それ以外→RUNNING
 func _tick_state_tasks(state: YoiState, delta: float) -> int:
-	var tasks := _get_runtime_tasks(state)
-	if tasks.is_empty():
+	if state.tasks.is_empty():
 		return YoiTask.RUNNING
-	var ctx := YoiCtx.new(self, state)
+	var ctx := YoiCtx.new(self , state)
 	var all_succeeded := true
-	for task in tasks:
+	for task in state.tasks:
 		var s: int = task._tick(delta, ctx)
 		if s == YoiTask.FAILURE:
 			return YoiTask.FAILURE
@@ -158,7 +164,7 @@ func _evaluate_transition(
 		transition: YoiTransition,
 		state_status: int,
 ) -> bool:
-	if transition.target_state == null:
+	if not _transition_targets.has(transition):
 		return false
 
 	# トリガー種別チェック
@@ -185,7 +191,7 @@ func _evaluate_transition(
 				return false
 
 	# Conditions評価（AND結合）
-	for condition in _get_runtime_transition_conditions(transition):
+	for condition in transition.conditions:
 		if condition == null:
 			continue
 		var result: bool = condition._evaluate(blackboard)
@@ -222,18 +228,17 @@ func _do_transition(target: YoiState) -> void:
 
 
 func _enter_state(state: YoiState) -> void:
-	var ctx := YoiCtx.new(self, state)
+	var ctx := YoiCtx.new(self , state)
 	_state_enter_status[state] = _compute_enter_status(state, ctx)
 	_active_path.append(state)
 	state_entered.emit(state)
 
 
 func _compute_enter_status(state: YoiState, ctx: YoiCtx) -> int:
-	var tasks := _get_runtime_tasks(state)
-	if tasks.is_empty():
+	if state.tasks.is_empty():
 		return YoiTask.SUCCESS
 	var all_succeeded := true
-	for task in tasks:
+	for task in state.tasks:
 		var s: int = task._enter(ctx)
 		if s == YoiTask.FAILURE:
 			return YoiTask.FAILURE
@@ -243,8 +248,8 @@ func _compute_enter_status(state: YoiState, ctx: YoiCtx) -> int:
 
 
 func _exit_state(state: YoiState) -> void:
-	var ctx := YoiCtx.new(self, state)
-	for task in _get_runtime_tasks(state):
+	var ctx := YoiCtx.new(self , state)
+	for task in state.tasks:
 		task._exit(ctx)
 	state_exited.emit(state)
 
@@ -252,7 +257,7 @@ func _exit_state(state: YoiState) -> void:
 # Enter Conditionsを満たす候補をselection_modeに従って選択
 func _select_child_state(state: YoiState) -> YoiState:
 	var candidates: Array[YoiState] = []
-	for child in _get_runtime_child_states(state):
+	for child in _state_child_states.get(state, []):
 		if _check_enter_conditions(child):
 			candidates.append(child)
 	if candidates.is_empty():
@@ -269,10 +274,9 @@ func _select_child_state(state: YoiState) -> YoiState:
 
 
 func _evaluate_weight(state: YoiState) -> float:
-	var selection_weight: YoiSelectionWeight = _state_selection_weights.get(state)
-	if selection_weight == null:
+	if state.selection_weight == null:
 		return 0.0
-	return selection_weight.evaluate(blackboard)
+	return state.selection_weight.evaluate(blackboard)
 
 
 func _select_highest_weight(candidates: Array[YoiState]) -> YoiState:
@@ -305,7 +309,7 @@ func _select_weighted_random(candidates: Array[YoiState]) -> YoiState:
 
 
 func _check_enter_conditions(state: YoiState) -> bool:
-	for condition in _get_runtime_enter_conditions(state):
+	for condition in state.enter_conditions:
 		if condition == null:
 			continue
 		var result: bool = condition._evaluate(blackboard)
@@ -338,73 +342,38 @@ func _build_path_from_root(state: YoiState) -> Array[YoiState]:
 	return path
 
 
+func _to_state_key(state: YoiState) -> StringName:
+	return StringName(String(state.name).to_snake_case())
+
+
 func _rebuild_runtime_cache() -> void:
 	_root_state = null
 	_state_child_states.clear()
-	_state_transitions.clear()
-	_state_tasks.clear()
-	_state_sensors.clear()
-	_state_enter_conditions.clear()
-	_state_selection_weights.clear()
-	_transition_conditions.clear()
+	_transition_targets.clear()
 
 	for child in get_children():
 		if child is YoiState:
 			if _root_state == null:
 				_root_state = child
-			_cache_state_runtime(child)
+
+	if _root_state != null:
+		_cache_child_states_recursive(_root_state)
 
 
-func _cache_state_runtime(state: YoiState) -> void:
+func _cache_child_states_recursive(state: YoiState) -> void:
 	var child_states: Array[YoiState] = []
-	var transitions: Array[YoiTransition] = []
 	for child in state.get_children():
 		if child is YoiState:
 			child_states.append(child)
-			_cache_state_runtime(child)
-		elif child is YoiTransition:
-			transitions.append(child)
-			_transition_conditions[child] = child.conditions
-
 	_state_child_states[state] = child_states
-	_state_transitions[state] = transitions
-	_state_tasks[state] = state.tasks
-	_state_sensors[state] = state.sensors
-	_state_enter_conditions[state] = state.enter_conditions
-	_state_selection_weights[state] = state.selection_weight
 
+	for transition in state.transitions:
+		if not transition.target_state_path.is_empty():
+			var target := state.get_node_or_null(transition.target_state_path)
+			if target is YoiState:
+				_transition_targets[transition] = target
+			else:
+				push_warning("YoiStateTree: invalid target_state_path '%s' in transition" % transition.target_state_path)
 
-func _get_runtime_child_states(state: YoiState) -> Array[YoiState]:
-	var r: Array[YoiState] = []
-	r.assign(_state_child_states.get(state, []))
-	return r
-
-
-func _get_runtime_transitions(state: YoiState) -> Array[YoiTransition]:
-	var r: Array[YoiTransition] = []
-	r.assign(_state_transitions.get(state, []))
-	return r
-
-
-func _get_runtime_tasks(state: YoiState) -> Array[YoiTask]:
-	var r: Array[YoiTask] = []
-	r.assign(_state_tasks.get(state, []))
-	return r
-
-
-func _get_runtime_sensors(state: YoiState) -> Array[YoiSensor]:
-	var r: Array[YoiSensor] = []
-	r.assign(_state_sensors.get(state, []))
-	return r
-
-
-func _get_runtime_enter_conditions(state: YoiState) -> Array[YoiCondition]:
-	var r: Array[YoiCondition] = []
-	r.assign(_state_enter_conditions.get(state, []))
-	return r
-
-
-func _get_runtime_transition_conditions(transition: YoiTransition) -> Array[YoiCondition]:
-	var r: Array[YoiCondition] = []
-	r.assign(_transition_conditions.get(transition, []))
-	return r
+	for child in child_states:
+		_cache_child_states_recursive(child)

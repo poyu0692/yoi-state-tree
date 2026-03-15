@@ -1,36 +1,31 @@
 [gd_scene format=3 uid="uid://cercno8hyiq0y"]
 
 [ext_resource type="Script" uid="uid://ci46pvlm7m0p" path="res://addons/yoi_state_tree/core/yoi_state_tree.gd" id="1_kdubu"]
-[ext_resource type="Script" uid="uid://dcij5fj7morjb" path="res://addons/yoi_state_tree/core/yoi_blackboard.gd" id="2_0hol4"]
 [ext_resource type="Script" uid="uid://o3fugo64lxvq" path="res://addons/yoi_state_tree/core/yoi_state.gd" id="2_epypp"]
-[ext_resource type="Script" uid="uid://cvkh3vf6hnocw" path="res://addons/yoi_state_tree/sensors/yoi_sensor.gd" id="3_kdubu"]
-[ext_resource type="Script" uid="uid://bxq23ccoyavqr" path="res://addons/yoi_state_tree/core/yoi_selection_weight.gd" id="5_q6r6c"]
+[ext_resource type="Script" uid="uid://dcij5fj7morjb" path="res://addons/yoi_state_tree/core/yoi_blackboard.gd" id="2_kdubu"]
 [ext_resource type="Script" uid="uid://ca8o7ogltqajb" path="res://addons/oboro/oboro_component.gd" id="6_d21ai"]
 
-[sub_resource type="Resource" id="Resource_kdubu"]
-script = ExtResource("2_0hol4")
+[sub_resource type="Resource" id="Resource_4d7sh"]
+script = ExtResource("2_kdubu")
+_data = Dictionary[StringName, Variant]({
+&"is_attacking": false,
+&"player_id": &"player_id",
+&"target_distance": 0.0
+})
 metadata/_custom_type_script = "uid://dcij5fj7morjb"
-
-[sub_resource type="Resource" id="Resource_q6r6c"]
-script = ExtResource("5_q6r6c")
-metadata/_custom_type_script = "uid://bxq23ccoyavqr"
 
 [node name="Node2D" type="Node2D" unique_id=419194786]
 
 [node name="YoiStateTree" type="Node" parent="." unique_id=674401545]
 script = ExtResource("1_kdubu")
-blackboard = SubResource("Resource_kdubu")
+blackboard = SubResource("Resource_4d7sh")
 
-[node name="YoiState" type="Node" parent="YoiStateTree" unique_id=350277728]
-script = ExtResource("2_epypp")
-sensors = Array[ExtResource("3_kdubu")]([null])
-selection_weight = SubResource("Resource_q6r6c")
-metadata/_custom_type_script = "uid://o3fugo64lxvq"
-
-[node name="YoiState" type="Node" parent="YoiStateTree/YoiState" unique_id=1230765139]
+[node name="YoiState" type="Node" parent="YoiStateTree" unique_id=859290399]
 script = ExtResource("2_epypp")
 metadata/_custom_type_script = "uid://o3fugo64lxvq"
 
 [node name="OboroComponent" type="Node" parent="." unique_id=513056624]
 script = ExtResource("6_d21ai")
 metadata/_custom_type_script = "uid://ca8o7ogltqajb"
+
+[node name="Timer" type="Timer" parent="." unique_id=1080572278]

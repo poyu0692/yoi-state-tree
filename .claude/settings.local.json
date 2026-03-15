@@ -4,7 +4,18 @@
       "WebSearch",
       "WebFetch(domain:dev.epicgames.com)",
       "WebFetch(domain:unrealengine.com)",
-      "WebFetch(domain:www.unrealengine.com)"
+      "WebFetch(domain:www.unrealengine.com)",
+      "Bash(mv sensors/yoi_sensor.gd sensors/yoi_evaluator.gd)",
+      "Bash(mv sensors/yoi_sensor.gd.uid sensors/yoi_evaluator.gd.uid)",
+      "Bash(mv sensors/yoi_node_sensor.gd sensors/yoi_node_evaluator.gd)",
+      "Bash(mv sensors/yoi_node_sensor.gd.uid sensors/yoi_node_evaluator.gd.uid)",
+      "Bash(mv sensors/yoi_property_sensor.gd sensors/yoi_property_evaluator.gd)",
+      "Bash(mv sensors/yoi_property_sensor.gd.uid sensors/yoi_property_evaluator.gd.uid)",
+      "Bash(mv sensors/yoi_autoload_node_sensor.gd sensors/yoi_autoload_node_evaluator.gd)",
+      "Bash(mv sensors/yoi_autoload_node_sensor.gd.uid sensors/yoi_autoload_node_evaluator.gd.uid)",
+      "Bash(mv sensors/yoi_autoload_property_sensor.gd sensors/yoi_autoload_property_evaluator.gd)",
+      "Bash(mv sensors/yoi_autoload_property_sensor.gd.uid sensors/yoi_autoload_property_evaluator.gd.uid)",
+      "Bash(mv sensors:*)"
     ]
   }
 }
