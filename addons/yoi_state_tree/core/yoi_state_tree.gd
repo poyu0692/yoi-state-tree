@@ -141,7 +141,7 @@ func _tick(delta: float) -> void:
 		if from_leaf != to_leaf and to_leaf != null:
 			state_leaf_changed.emit(_to_state_key(to_leaf))
 
-	_pending_events.clear()
+
 
 
 # 複数タスクのStatus集約: 1つでもFAILED→FAILED、全部SUCCEEDED→SUCCEEDED、それ以外→RUNNING
@@ -181,8 +181,10 @@ func _evaluate_transition(
 			if state_status == YoiTask.RUNNING:
 				return false
 		YoiTransition.Trigger.ON_EVENT:
-			if transition.event == &"" or transition.event not in _pending_events:
+			var idx := _pending_events.find(transition.event)
+			if transition.event == &"" or idx == -1:
 				return false
+			_pending_events.remove_at(idx)
 		YoiTransition.Trigger.ON_ENTER_SUCCEEDED:
 			if _state_enter_status.get(_owner_state, -1) != YoiTask.SUCCESS:
 				return false
@@ -356,8 +358,9 @@ func _rebuild_runtime_cache() -> void:
 			if _root_state == null:
 				_root_state = child
 
-	if _root_state != null:
-		_cache_child_states_recursive(_root_state)
+	for child in get_children():
+		if child is YoiState:
+			_cache_child_states_recursive(child)
 
 
 func _cache_child_states_recursive(state: YoiState) -> void:
